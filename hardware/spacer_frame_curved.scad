@@ -109,21 +109,45 @@ module _outer_solid()
 
 module _tapered_wall()
 {
+    // Minimum printable wall thickness (mm) — keeps the hollow cutout away
+    // from the outer surface at the pointy tips of the footprint.
+    min_wall = 0.9;
+
     difference()
     {
         _outer_solid();
 
-        hull()
+        // Inner void: the hull of the inner bottom and inner top shapes,
+        // but intersected with a slightly inset version of the outer solid
+        // so no face of the void ever gets closer than min_wall to the
+        // outer surface (fixes knife-edge tips flagged by print services).
+        intersection()
         {
-            translate([0, 0, -0.01])
-            linear_extrude(height = 0.01)
-            offset(-wall_thickness)
-            _cover_footprint_2d();
+            hull()
+            {
+                translate([0, 0, -0.01])
+                linear_extrude(height = 0.01)
+                offset(-wall_thickness)
+                _cover_footprint_2d();
 
-            translate([0, 0, spacer_height + 0.01])
-            linear_extrude(height = 0.01)
-            offset(-wall_thickness)
-            _cover_footprint_top_2d();
+                translate([0, 0, spacer_height + 0.01])
+                linear_extrude(height = 0.01)
+                offset(-wall_thickness)
+                _cover_footprint_top_2d();
+            }
+
+            hull()
+            {
+                translate([0, 0, -0.01])
+                linear_extrude(height = 0.01)
+                offset(-min_wall)
+                _cover_footprint_2d();
+
+                translate([0, 0, spacer_height + 0.01])
+                linear_extrude(height = 0.01)
+                offset(-min_wall)
+                _cover_footprint_top_2d();
+            }
         }
     }
 }
