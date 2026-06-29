@@ -22,6 +22,11 @@ const int reported_cpi = 800;
 // This is the frequency at which we poll sensors/buttons and send HID reports.
 const int report_Hz = 120;
 
+// Minimum per-axis motion magnitude (in reported_cpi units) to report cursor movement.
+// Sensor readings below this are discarded, eliminating residual drift after a fast flick.
+// Raise this if you notice coasting after lifting your fingers; lower it if slow movements feel sluggish.
+const float motion_threshold = 0.5f;
+
 // Scroll detection tuning.
 // Scroll is triggered when |Z| dominates |X| and |Y| by at least this ratio.
 const float scroll_dominance_ratio = 2.0f;
@@ -940,6 +945,12 @@ void loop()
     {
       // The sensor reported movement: apply the 3x4 sensor transform.
       delta = apply_sensor_transform(st, v1, v2);
+
+      // Discard tiny residual motion below the threshold.
+      // This eliminates the brief coasting drift after a fast flick when fingers are lifted.
+      if (fabsf(delta.x) < motion_threshold) delta.x = 0;
+      if (fabsf(delta.y) < motion_threshold) delta.y = 0;
+
       // Figure out if we should scroll.
       // Scrolling is active when Z dominates both X and Y by the required ratio
       // and exceeds the dead zone. A hysteresis counter suppresses cursor output
