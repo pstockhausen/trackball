@@ -27,7 +27,9 @@ const int report_Hz = 120;
 const float scroll_dominance_ratio = 2.0f;
 // Minimum |Z| delta (in reported_cpi units per report) before scrolling can trigger.
 // Prevents false scroll from tiny incidental ball twist.
-const float scroll_dead_zone = 0.5f;
+// keep this small, the Z row of the transform uses a 0.5 scale factor,
+// so Z values during normal cursor movement are typically well below 1.0.
+const float scroll_dead_zone = 0.1f;
 // Frames after a scroll gesture ends during which cursor output is suppressed,
 // preventing cursor leakage at the end of a scroll gesture.
 const int scroll_lock_frames = 3;
@@ -54,7 +56,7 @@ const int scroll_tick = 32;
 // 2 - 128x128 SSD1351 on the SPI bus  ( https://www.amazon.com/gp/product/B07DB5YFGW )
 // #define SENSOR_DISPLAY 1
 
-// Use this to start out in sensor display mode. 
+// Use this to start out in sensor display mode.
 // Useful if you're just testing a sensor and don't have any buttons hooked up yet.
 // Only used if SENSOR_DISPLAY is non-zero
 // #define SENSOR_DISPLAY_ON_STARTUP
@@ -94,31 +96,31 @@ const int scroll_tick = 32;
   // piezo speaker +
   #define PIN_PIEZO 3
   // Mouse button inputs
-  #define PIN_BUTTON_LEFT 4 
-  #define PIN_BUTTON_MIDDLE 5 
-  #define PIN_BUTTON_RIGHT 6 
+  #define PIN_BUTTON_LEFT 4
+  #define PIN_BUTTON_MIDDLE 5
+  #define PIN_BUTTON_RIGHT 6
   // Select pins for sensors
-  #define PIN_SENSOR_1_SELECT 18  
-  #define PIN_SENSOR_2_SELECT 19  
-#endif  
+  #define PIN_SENSOR_1_SELECT 18
+  #define PIN_SENSOR_2_SELECT 19
+#endif
 
 #if defined(PINS_QTPY)
   // Pin assignments on Seeeduino XIAO/Adafruit QT Py:
   // piezo speaker +
   #define PIN_PIEZO A3
   // Mouse button inputs
-  #define PIN_BUTTON_LEFT A0 
-  #define PIN_BUTTON_RIGHT A1 
-  #define PIN_BUTTON_MIDDLE A2 
+  #define PIN_BUTTON_LEFT A0
+  #define PIN_BUTTON_RIGHT A1
+  #define PIN_BUTTON_MIDDLE A2
 
   // SPI Select pins for sensors
   // Sadly, these have different/incompatible definitions on the QT Py RP2040.
   #if defined(PINS_QTPY_RP2040)
-    #define PIN_SENSOR_1_SELECT PIN_SERIAL2_RX  
-    #define PIN_SENSOR_2_SELECT PIN_SERIAL2_TX  
+    #define PIN_SENSOR_1_SELECT PIN_SERIAL2_RX
+    #define PIN_SENSOR_2_SELECT PIN_SERIAL2_TX
   #else
-    #define PIN_SENSOR_1_SELECT A7  
-    #define PIN_SENSOR_2_SELECT A6  
+    #define PIN_SENSOR_1_SELECT A7
+    #define PIN_SENSOR_2_SELECT A6
   #endif
 
   // Testing: use software SPI
@@ -143,9 +145,9 @@ const int scroll_tick = 32;
   // PIN_PIEZO is already defined in the variant's pins_arduino.h
 
    // Mouse button inputs
-  #define PIN_BUTTON_LEFT PIN_B16 
-  #define PIN_BUTTON_RIGHT PIN_B17 
-  #define PIN_BUTTON_MIDDLE PIN_B18 
+  #define PIN_BUTTON_LEFT PIN_B16
+  #define PIN_BUTTON_RIGHT PIN_B17
+  #define PIN_BUTTON_MIDDLE PIN_B18
 
   // SPI Select pins for sensors
 
@@ -183,7 +185,7 @@ uint8_t const desc_hid_report[] =
   HID_USAGE      ( HID_USAGE_DESKTOP_MOUSE     )                   ,
   HID_COLLECTION ( HID_COLLECTION_APPLICATION  )                   ,
     /* Report ID if any */
-    // __VA_ARGS__ 
+    // __VA_ARGS__
     HID_USAGE      ( HID_USAGE_DESKTOP_POINTER )                   ,
     HID_COLLECTION ( HID_COLLECTION_PHYSICAL   )                   ,
       HID_USAGE_PAGE  ( HID_USAGE_PAGE_BUTTON  )                   ,
@@ -191,16 +193,16 @@ uint8_t const desc_hid_report[] =
         HID_USAGE_MAX   ( 5                                      ) ,
         HID_LOGICAL_MIN ( 0                                      ) ,
         HID_LOGICAL_MAX ( 1                                      ) ,
-        /* Left, Right, Middle, Backward, Forward buttons */ 
+        /* Left, Right, Middle, Backward, Forward buttons */
         HID_REPORT_COUNT( 5                                      ) ,
         HID_REPORT_SIZE ( 1                                      ) ,
         HID_INPUT       ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ) ,
-        /* 3 bit padding */ 
+        /* 3 bit padding */
         HID_REPORT_COUNT( 1                                      ) ,
         HID_REPORT_SIZE ( 3                                      ) ,
         HID_INPUT       ( HID_CONSTANT                           ) ,
       HID_USAGE_PAGE  ( HID_USAGE_PAGE_DESKTOP )                   ,
-        /* X, Y position [-127, 127] */ 
+        /* X, Y position [-127, 127] */
         HID_USAGE       ( HID_USAGE_DESKTOP_X                    ) ,
         HID_USAGE       ( HID_USAGE_DESKTOP_Y                    ) ,
 #if USE_16_BIT_DELTAS
@@ -215,7 +217,7 @@ uint8_t const desc_hid_report[] =
         HID_REPORT_SIZE ( 8                                      ) ,
 #endif
         HID_INPUT       ( HID_DATA | HID_VARIABLE | HID_RELATIVE ) ,
-    HID_COLLECTION_END                                             , 
+    HID_COLLECTION_END                                             ,
     HID_COLLECTION ( HID_COLLECTION_LOGICAL   )                    ,
 #if USE_SCROLL_RESOLUTION_MULTIPLIER
       HID_USAGE_PAGE  ( HID_USAGE_PAGE_DESKTOP )                   ,
@@ -229,23 +231,23 @@ uint8_t const desc_hid_report[] =
         HID_INPUT       ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ) ,
 #endif
       HID_USAGE_PAGE  ( HID_USAGE_PAGE_DESKTOP )                   ,
-        /* Veritcal wheel scroll [-127, 127] */ 
+        /* Veritcal wheel scroll [-127, 127] */
         HID_USAGE       ( HID_USAGE_DESKTOP_WHEEL                )  ,
         HID_LOGICAL_MIN ( 0x81                                   )  ,
         HID_LOGICAL_MAX ( 0x7f                                   )  ,
         HID_REPORT_COUNT( 1                                      )  ,
         HID_REPORT_SIZE ( 8                                      )  ,
         HID_INPUT       ( HID_DATA | HID_VARIABLE | HID_RELATIVE )  ,
-      HID_USAGE_PAGE  ( HID_USAGE_PAGE_CONSUMER ), 
-       /* Horizontal wheel scroll [-127, 127] */ 
-        HID_USAGE_N     ( HID_USAGE_CONSUMER_AC_PAN, 2           ), 
-        HID_LOGICAL_MIN ( 0x81                                   ), 
-        HID_LOGICAL_MAX ( 0x7f                                   ), 
-        HID_REPORT_COUNT( 1                                      ), 
-        HID_REPORT_SIZE ( 8                                      ), 
-        HID_INPUT       ( HID_DATA | HID_VARIABLE | HID_RELATIVE ), 
-    HID_COLLECTION_END                                            , 
-  HID_COLLECTION_END 
+      HID_USAGE_PAGE  ( HID_USAGE_PAGE_CONSUMER ),
+       /* Horizontal wheel scroll [-127, 127] */
+        HID_USAGE_N     ( HID_USAGE_CONSUMER_AC_PAN, 2           ),
+        HID_LOGICAL_MIN ( 0x81                                   ),
+        HID_LOGICAL_MAX ( 0x7f                                   ),
+        HID_REPORT_COUNT( 1                                      ),
+        HID_REPORT_SIZE ( 8                                      ),
+        HID_INPUT       ( HID_DATA | HID_VARIABLE | HID_RELATIVE ),
+    HID_COLLECTION_END                                            ,
+  HID_COLLECTION_END
 #endif
 };
 
@@ -363,7 +365,7 @@ void reset_display()
 #if defined(SENSOR_DISPLAY_GRAY4)
     display.setContrast(0x7f);
 #endif
-  } else {    
+  } else {
     display.print(F("Press all 3 buttons\ntogether to view \nsensor data."));
 #if defined(SENSOR_DISPLAY_GRAY4)
     display.setContrast(0x1f);
@@ -421,8 +423,8 @@ void draw_sensor_pixels(int x, int y, uint8_t *pixels, int width, int height, si
         dst[rowbytes] = color;
         dst++;
       }
-    } 
-    else 
+    }
+    else
     {
       for(int ix = 0; ix < width; ix += 2)
       {
@@ -451,7 +453,7 @@ void draw_sensor_pixels(int x, int y, uint8_t *pixels, int width, int height, si
   for(int iy = 0; iy < height; iy++)
   {
     if (zoom)
-    {    
+    {
       // write each line of pixels twice
       for(int j = 0; j < 2; j++)
       {
@@ -538,7 +540,7 @@ void display_sensors()
   unsigned long end = micros();
 
   display.setCursor(0,24);
-  display.printf("s1: 0x%02x - 0x%02x\ns2: 0x%02x - 0x%02x", 
+  display.printf("s1: 0x%02x - 0x%02x\ns2: 0x%02x - 0x%02x",
     s1.Minimum_Pixel, s1.Maximum_Pixel,
     s2.Minimum_Pixel, s2.Maximum_Pixel);
 
@@ -668,7 +670,7 @@ float ledRed = 0;
 float ledGreen = 0;
 float ledBlue = 0;
 
-void setup() 
+void setup()
 {
   // pinMode(LED_BUILTIN, OUTPUT);
 
@@ -676,7 +678,7 @@ void setup()
   Serial1.end();
 
   // Set up a human-readable name for the device descriptor
-  const char* deviceName = 
+  const char* deviceName =
   #if defined(DEVICE_NAME)
     // Allow the platformio.ini file to override the default device name
     // Gymnastics to convert macro text to a string literal
@@ -709,7 +711,7 @@ void setup()
   while (!Serial) { delay(100); }
   debugLogger.printf(("Opened serial port\n"));
 #endif
-  
+
   // disable the chip-select pins for both sensors (chip select is active-low)
   // adns::init() now does this internally
   // pinMode (PIN_SENSOR_1_SELECT, OUTPUT);
@@ -717,7 +719,7 @@ void setup()
   // pinMode (PIN_SENSOR_2_SELECT, OUTPUT);
   // digitalWrite(PIN_SENSOR_2_SELECT, HIGH);
 
-#if defined(DISPLAY_CS_PIN) 
+#if defined(DISPLAY_CS_PIN)
   // also, disable chip-select for an SPI display if we're using one.
   pinMode (DISPLAY_CS_PIN, OUTPUT);
   digitalWrite(DISPLAY_CS_PIN, HIGH);
@@ -746,7 +748,7 @@ void setup()
   debugLogger.printf("Initializing sensor 2:\n");
   bool s2_inited = s2.init();
 
-  // Since converting to Adafruit_SPIDevice, sometimes the first init attempt fails, 
+  // Since converting to Adafruit_SPIDevice, sometimes the first init attempt fails,
   // for reasons I haven't yet figured out.
   // Retrying after initing the other sensor sometimes seems to work, which makes no sense.
   if (!s1_inited)
@@ -784,7 +786,7 @@ void setup()
     {
       debugLogger.printf("Display found\n");
       // Something responded at the correct address. Assume it's the display.
-      if (!display.begin(display_address)) 
+      if (!display.begin(display_address))
       {
         debugLogger.printf("Display init failed\n");
       }
@@ -797,7 +799,7 @@ void setup()
       }
     }
   }
-#elif defined(SENSOR_DISPLAY_SPI) 
+#elif defined(SENSOR_DISPLAY_SPI)
   // Communication with the SPI display is one-way, so just assume it's going to be there.
   display.begin();
   display_ready = true;
@@ -875,6 +877,9 @@ void loop()
   unsigned long loop_start_time = micros();
   // Time taken by the last loop, saved so we can display it during the next loop.
   static unsigned long loop_time = 0;
+  // Counts down after a scroll gesture ends to suppress cursor leakage.
+  // Declared here so it decrements every loop iteration, not just when motion is detected.
+  static int scroll_lock_countdown = 0;
   bool sendReport = false;
   bool sendWakeup = false;
   Vector delta;
@@ -890,7 +895,7 @@ void loop()
   {
     // Poll sensors for mouse movement
 
-    // v1 and v2 contain the floating point x/y motion values from each sensor, 
+    // v1 and v2 contain the floating point x/y motion values from each sensor,
     // scaled from the sensor's CPI to units of reported_cpi.
     Vector v1 = s1.motion();
     Vector v2 = s2.motion();
@@ -935,13 +940,10 @@ void loop()
     {
       // The sensor reported movement: apply the 3x4 sensor transform.
       delta = apply_sensor_transform(st, v1, v2);
-
       // Figure out if we should scroll.
       // Scrolling is active when Z dominates both X and Y by the required ratio
       // and exceeds the dead zone. A hysteresis counter suppresses cursor output
       // for a few frames after a scroll gesture ends, preventing end-of-gesture leakage.
-      static int scroll_lock_countdown = 0;
-
       if (fabsf(delta.z) > scroll_dead_zone &&
           fabsf(delta.z) > fabsf(delta.x) * scroll_dominance_ratio &&
           fabsf(delta.z) > fabsf(delta.y) * scroll_dominance_ratio)
@@ -979,8 +981,14 @@ void loop()
         sendReport = true;
       }
     }
+    else
+    {
+      // No sensor motion this frame — still tick down the scroll lock if active.
+      if (scroll_lock_countdown > 0)
+        scroll_lock_countdown--;
+    }
   }
-  
+
   // Poll for button states
   for(int i=0; i<buttonCount; i++)
   {
@@ -1038,7 +1046,7 @@ void loop()
             // Erase the sensor draw area
             const int max_sensor_draw_size = ((36 * 2) + 2);
             display.fillRect(
-              0, 
+              0,
               display.height() - max_sensor_draw_size,
               display.width(),
               max_sensor_draw_size,
@@ -1116,7 +1124,7 @@ void loop()
     (void)tud_hid_report(0, &report, sizeof(report));
 #endif
   }
-#if SENSOR_DISPLAY  
+#if SENSOR_DISPLAY
   if (display_ready)
   {
     ////////
@@ -1159,16 +1167,16 @@ void loop()
 
   // Fade in approximately half a second
   static float fadeVal = 1.0 / (report_Hz / 2);
-  
+
   ledRed -= fadeVal;
   if (ledRed < 0)
-    ledRed = 0; 
+    ledRed = 0;
   ledGreen -= fadeVal;
   if (ledGreen < 0)
-    ledGreen = 0; 
+    ledGreen = 0;
   ledBlue -= fadeVal;
   if (ledBlue < 0)
-    ledBlue = 0; 
+    ledBlue = 0;
 #endif
 
   // Delay to keep the loop time right around report_microseconds
@@ -1177,7 +1185,7 @@ void loop()
   {
     delayMicroseconds(report_microseconds - loop_time);
   }
- 
+
     Watchdog.reset();
 }
 
