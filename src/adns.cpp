@@ -4,6 +4,7 @@
 #include "trackball.h"
 #include "Vector.h"
 #include "adns.h"
+#include "util.h"
 
 #ifdef ADNS_SUPPORT_ADNS9800
   #include "ADNS9800_firmware.h"
@@ -98,8 +99,6 @@ static inline int bytes2int(byte h, byte l)
   result += l;
   return result;
 }
-
-#define CLAMP(val, min, max) (val > max)?max:((val < min)?min:val)
 
 static const uint32_t bitrate = 200000;
 
@@ -309,23 +308,11 @@ byte adns::read_reg(byte reg_addr)
   com_end();
   delayMicroseconds(mcs_tSRW - mcs_tSCLK_NCS_read);
 
-  // This is too spammy during normal use, but can be useful when debugging sensor issues.
-  if (0)
-  {
-      debugLogger.printf("read register 0x%02x, value = 0x%02x\n", int(reg_addr), int(data));
-  }
-  
   return data;
 }
 
 void adns::write_reg(byte reg_addr, byte data)
 {
-  // This is too spammy during normal use, but can be useful when debugging sensor issues.
-  if (0)
-  {
-      debugLogger.printf("write register 0x%02x, value = 0x%02x\n", int(reg_addr), int(data));
-  }
-
   com_begin();
   
   //send adress of the register, with MSBit = 1 to indicate it's a write
@@ -410,16 +397,14 @@ bool adns::upload_firmware()
 
   delay(10);
 
-#if 1
   // SROM CRC test
-  write_reg(REG_SROM_Enable, 0x15); 
+  write_reg(REG_SROM_Enable, 0x15);
   delay(10);
   int upper = read_reg(REG_Data_Out_Upper);
   int lower = read_reg(REG_Data_Out_Lower);
   // The datasheet doesn't specify what the expected value for a successful CRC test is.
   // A successful test on the 3360 seems to return the value 0xbeef.
   debugLogger.printf("SROM CRC test result: 0x%02x%02x\n", upper, lower);
-#endif
 
   switch(product_id)
   {
@@ -569,7 +554,7 @@ void adns::set_cpi(int cpi)
         // The ADNS-9800 datasheet says that the value of REG_Configuration_I specifies the resolution in units of 50 cpi,
         //     with a minimum of 0x01 (50 cpi) and a maximum of 0xA4 (8200cpi).
         cpi /= 50;
-        cpi = CLAMP(cpi, 1, 0xA4);
+        cpi = clamp(cpi, 1, 0xA4);
         write_reg(REG_Configuration_I, cpi);
         debugLogger.printf(", REG_Configuration_I = 0x%02x", cpi);
       break;
@@ -578,7 +563,7 @@ void adns::set_cpi(int cpi)
         //     It does say that the chip has "selectable resolutions up to 12000cpi with 100cpi step size", and that the default value
         //     for the register is 0x31.
         cpi /= 100;
-        cpi = CLAMP(cpi, 1, (12000 / 100));
+        cpi = clamp(cpi, 1, (12000 / 100));
         write_reg(REG_Configuration_I, cpi);
         debugLogger.printf(", REG_Configuration_I = 0x%02x", cpi);
       break;
@@ -588,7 +573,7 @@ void adns::set_cpi(int cpi)
         //     default values of 0x42 for Resolution_L and 0x0 for Resolution_H.
         //     16000 / 50 comes out to 320 (> 255), so it makes sense that they would need an additional 8 bit register for the full range.
         cpi /= 50;
-        cpi = CLAMP(cpi, 1, (16000 / 50));
+        cpi = clamp(cpi, 1, (16000 / 50));
         write_reg(REG_Resolution_L, cpi & 0x00FF);
         write_reg(REG_Resolution_H, cpi >> 8);
         debugLogger.printf(", REG_Resolution_L = 0x%02x, REG_Resolution_H = 0x%02x",

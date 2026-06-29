@@ -6,6 +6,7 @@
 #include "trackball.h"
 #include "Vector.h"
 #include "adns.h"
+#include "util.h"
 
 #if defined(PIN_NEOPIXEL)
   #include <Adafruit_NeoPixel.h>
@@ -20,6 +21,18 @@ const int reported_cpi = 800;
 
 // This is the frequency at which we poll sensors/buttons and send HID reports.
 const int report_Hz = 120;
+
+// Scroll detection tuning.
+// Scroll is triggered when |Z| dominates |X| and |Y| by at least this ratio.
+const float scroll_dominance_ratio = 2.0f;
+// Minimum |Z| delta (in reported_cpi units per report) before scrolling can trigger.
+// Prevents false scroll from tiny incidental ball twist.
+const float scroll_dead_zone = 0.5f;
+// Frames after a scroll gesture ends during which cursor output is suppressed,
+// preventing cursor leakage at the end of a scroll gesture.
+const int scroll_lock_frames = 3;
+// Scroll accumulator threshold per tick. Lower = faster scrolling.
+const int scroll_tick = 32;
 
 // Use a custom HID descriptor instead of TUD_HID_REPORT_DESC_MOUSE()
 #define USE_CUSTOM_HID_DESCRIPTOR 0
@@ -141,21 +154,9 @@ const int report_Hz = 120;
   #define PIN_SENSOR_1_SELECT PIN_SPI0_SS08
   #define SENSOR_1_SPI_DEVICE SPI
 
-  // sensor 2
-#if 1
-  // hardware SPI on SPI0.9 connector
+  // sensor 2: hardware SPI on SPI0.9 connector
   #define PIN_SENSOR_2_SELECT PIN_SPI0_SS09
   #define SENSOR_2_SPI_DEVICE SPI
-#elif 0
-  // hardware SPI on SPI1.13 connector
-  #define PIN_SENSOR_2_SELECT PIN_SPI1_SS
-  #define SENSOR_2_SPI_DEVICE SPI1
-#else
-  // software SPI on breakout connector
-  #define PIN_SENSOR_2_SELECT PIN_BREAKOUT1
-    // define these as sck, miso, mosi
-  #define SENSOR_2_SOFTWARE_SPI   PIN_BREAKOUT4, PIN_BREAKOUT3, PIN_BREAKOUT2
-#endif
 
   // Defs for the Wire interface for the display
   // It will be plugged into the Stemma Qt plug, a.k.a. Wire
@@ -265,31 +266,38 @@ const int report_microseconds = 1000000 / report_Hz;
 #define S2A (270 + 45)
 #define S2E 30
 
-// TODO: build a transform from the azimuth/elevation constants.
-
-// The sensor transform
-// Note that the sensor orientation I've been using all along is actually "sideways", for mechanical reasons
-// i.e. the X axis of the sensor points up/down, and the Y axis points parallel to the desk.
-// This transform takes that into account.
-float st[3][4] = 
+// The sensor transform maps [s1.x, s1.y, s2.x, s2.y] → [HID_X, HID_Y, HID_Z].
+//
+// This is a hand-engineered matrix, not a simple geometric pseudo-inverse.
+// Three design decisions shape it:
+//
+// 1. Axis swap: rolling the ball *away from the user* (world-Y rotation) moves the cursor
+//    left/right (HID_X), and rolling it sideways (world-X rotation) moves it forward/back
+//    (HID_Y).  This matches natural hand mechanics but means world-X and world-Y are
+//    swapped in the output relative to what a straight geometric derivation would give.
+//
+// 2. The -sqrt(2) coefficient on s2.x in the HID_X row cancels s1.x's contribution for
+//    world-X rotations, keeping HID_X blind to them.  The value is tuned to the geometry:
+//    s2 is at A=315 deg, so its s2.x responds to world-X with coefficient sqrt(2)/2;
+//    multiplying by -sqrt(2) gives -1, which exactly cancels s1.x = -1 for world-X.
+//
+// 3. The HID_Z (scroll) row uses only s1.y and s2.y averaged, dropping small cross-
+//    coupling terms for robustness.  Residual leakage is handled by the scroll heuristic.
+//
+// Note: the sensor is mounted sideways for mechanical reasons.
+// Sensor local X axis = up/down on the ball; sensor local Y axis = horizontal/tangential.
+float st[3][4] =
 {
 #if !defined(LEFT_HANDED)
-  // This is the "hack" transform I've been using for the new sensor location 
-  // (s1 at 180, s2 at  270 + 45, both at 30 degrees elevation)
-  { -1,        0,       -sqrtf(2.0),  0   },  // X is s2.x, scaled up a bit, with s1.x subtracted to compensate for s2 being off-axis
-  {  1,        0,        0,           0   },  // Y is s1.x
-  {  0,       -0.5,      0,          -0.5 }   // Z is the average of the two sensors' y components.
+  { -1,        0,       -sqrtf(2.0f),  0    },  // HID_X: world-Y rotation via s1.x, with s2.x cancelling world-X leakage
+  {  1,        0,        0,            0    },  // HID_Y: world-X rotation via s1.x
+  {  0,       -0.5f,     0,           -0.5f }   // HID_Z: average of both sensors' y (scroll)
 #else
-  // This is the transform for the left-handed version, where the main body has been mirrored.
-  {  1,        0,        sqrtf(2.0),  0   },  // X is s2.x, scaled up a bit, with s1.x subtracted to compensate for s2 being off-axis
-  {  1,        0,        0,           0   },  // Y is s1.x
-  {  0,       -0.5,      0,          -0.5 }   // Z is the average of the two sensors' y components.
+  // Left-handed version: main body is mirrored, so HID_X sign is flipped.
+  {  1,        0,        sqrtf(2.0f),  0    },  // HID_X: mirrored
+  {  1,        0,        0,            0    },  // HID_Y: unchanged
+  {  0,       -0.5f,     0,           -0.5f }   // HID_Z: unchanged
 #endif
-
-  // This was the transform for the original sensor location (s1 at 180 and s2 at 270, at zero elevation)
-  // {  0,        0,       -1,     0   },    // X is the inverse of the direct x reading of s2
-  // {  1,        0,        0,     0   },    // Y is the direct x reading of s1
-  // {  0,       -0.5,      0,    -0.5  }    // Z is the average of the two sensors' y components.
 };
 
 // sensor hardware abstraction
@@ -314,8 +322,7 @@ adns s1(PIN_SENSOR_1_SELECT, reported_cpi
   adns s2;
 #endif
 
-// scrolling
-const int scroll_tick = 64;
+// scrolling accumulator
 float scroll_accum = 0;
 
 
@@ -696,16 +703,10 @@ void setup()
 
 #if defined(SERIAL_DEBUG)
   Serial.begin(115200);
-
-#if 1
   // Wait for the serial port to be opened.
-  // NOTE: this will block forever, which can be inconvenient if you're trying to use the device.
+  // NOTE: this will block forever if you're trying to use the device without a console attached.
+  // Change to a delay(2000) if that's inconvenient.
   while (!Serial) { delay(100); }
-#else
-  // Add a short delay so I can get the console open before things start happening.
-  delay(2000);
-#endif
-
   debugLogger.printf(("Opened serial port\n"));
 #endif
   
@@ -856,7 +857,20 @@ void printBurst(adns &sensor)
     debugLogger.printf("x/y = %d/%d", sensor.x, sensor.y);
     debugLogger.println("");
 }
-void loop() 
+
+// Apply the 3x4 sensor transform matrix to two 2D sensor readings.
+// t[row][col] where col order is [v1.x, v1.y, v2.x, v2.y].
+static Vector apply_sensor_transform(const float t[3][4], Vector v1, Vector v2)
+{
+    const float v[4] = {v1.x, v1.y, v2.x, v2.y};
+    return Vector(
+        t[0][0]*v[0] + t[0][1]*v[1] + t[0][2]*v[2] + t[0][3]*v[3],
+        t[1][0]*v[0] + t[1][1]*v[1] + t[1][2]*v[2] + t[1][3]*v[3],
+        t[2][0]*v[0] + t[2][1]*v[1] + t[2][2]*v[2] + t[2][3]*v[3]
+    );
+}
+
+void loop()
 {
   unsigned long loop_start_time = micros();
   // Time taken by the last loop, saved so we can display it during the next loop.
@@ -919,51 +933,42 @@ void loop()
 
     if (v1.x != 0 || v1.y != 0 || v2.x != 0 || v2.y != 0)
     {
-      // The sensor reported movement.
+      // The sensor reported movement: apply the 3x4 sensor transform.
+      delta = apply_sensor_transform(st, v1, v2);
 
-      // multiply the sensor transform matrix by the vector of [v1.x, v1.y, v2.x, v2.y]
-      delta = Vector(
-        st[0][0] * v1.x + st[0][1] * v1.y + st[0][2] * v2.x + st[0][3] * v2.y, 
-        st[1][0] * v1.x + st[1][1] * v1.y + st[1][2] * v2.x + st[1][3] * v2.y, 
-        st[2][0] * v1.x + st[2][1] * v1.y + st[2][2] * v2.x + st[2][3] * v2.y
-      );
+      // Figure out if we should scroll.
+      // Scrolling is active when Z dominates both X and Y by the required ratio
+      // and exceeds the dead zone. A hysteresis counter suppresses cursor output
+      // for a few frames after a scroll gesture ends, preventing end-of-gesture leakage.
+      static int scroll_lock_countdown = 0;
 
-      ////// This is probably only useful when actively debugging sensor readings or the transform matrix.
-      ////// Otherwise it gets very spammy.
-      // debugLogger.print(F("v1 = "));
-      // debugLogger.print(v1);
-      // debugLogger.print(F(", v2 = "));
-      // debugLogger.print(v2);
-      // debugLogger.print(F(", delta = "));
-      // debugLogger.print(delta);
-      // debugLogger.println("");
-
-      // Figure out if we should scroll
-      if ((fabs(delta.z) > (fabs(delta.x) * 2)) && (fabs(delta.z) > (fabs(delta.y) * 2)))
+      if (fabsf(delta.z) > scroll_dead_zone &&
+          fabsf(delta.z) > fabsf(delta.x) * scroll_dominance_ratio &&
+          fabsf(delta.z) > fabsf(delta.y) * scroll_dominance_ratio)
       {
-        // Looks like we're scrolling more than not.
+        scroll_lock_countdown = scroll_lock_frames;
         scroll_accum += delta.z;
         scroll = scroll_accum / scroll_tick;
         scroll_accum -= scroll * scroll_tick;
-
-        // When we're scrolling, disable x/y movement
         delta.x = 0;
         delta.y = 0;
-        // debugLogger.print("Calculated scroll = ");
-        // debugLogger.print(scroll);
-        // debugLogger.print(", scroll_accum =  ");
-        // debugLogger.println(scroll_accum);
       }
       else
       {
         delta.z = 0;
+        if (scroll_lock_countdown > 0)
+        {
+          scroll_lock_countdown--;
+          delta.x = 0;
+          delta.y = 0;
+        }
       }
 
       if (scroll != 0)
       {
           click();
       }
-      if ((delta.x != 0) || (delta.y != 0) || 
+      if ((delta.x != 0) || (delta.y != 0) ||
 #if USE_SCROLL_RESOLUTION_MULTIPLIER
         (delta.z != 0)
 #else
@@ -976,14 +981,12 @@ void loop()
     }
   }
   
-  // Poll for button states 
-  if(1)
+  // Poll for button states
+  for(int i=0; i<buttonCount; i++)
   {
-    for(int i=0; i<buttonCount; i++)
+    int name = buttonNames[i];
+    if (digitalRead(buttonPins[i]) == LOW)
     {
-      int name = buttonNames[i];
-      if (digitalRead(buttonPins[i]) == LOW)
-      {
 #if defined(BUTTON_LIGHTS)
         // For the first three buttons, set a color whenever the button is down
         switch(i)
@@ -1046,26 +1049,19 @@ void loop()
     }
 #endif
 
-  }
   if (sendWakeup && USBDevice.suspended())
   {
     USBDevice.remoteWakeup();
   }
   if (sendReport)
   {
-    #define CLAMP(val, min, max) (val > max)?max:((val < min)?min:val)
 #if !USE_CUSTOM_HID_DESCRIPTOR
-      // if (scroll != 0)
-      // {
-      //   debugLogger.print("reporting wheel = ");
-      //   debugLogger.println(scroll);
-      // }
       usb_hid.mouseReport(
-        0, 
-        buttons, 
-        CLAMP(delta.x, SCHAR_MIN, SCHAR_MAX),
-        CLAMP(delta.y, SCHAR_MIN, SCHAR_MAX),
-        CLAMP(scroll, SCHAR_MIN, SCHAR_MAX),
+        0,
+        buttons,
+        clamp((int)delta.x, (int)SCHAR_MIN, (int)SCHAR_MAX),
+        clamp((int)delta.y, (int)SCHAR_MIN, (int)SCHAR_MAX),
+        clamp(scroll, (int)SCHAR_MIN, (int)SCHAR_MAX),
         0);
 #else
 #if USE_16_BIT_DELTAS
@@ -1095,13 +1091,13 @@ void loop()
     report_t report =
     {
       .buttons = buttons,
-      .x       = delta_t(CLAMP(delta.x, delta_min, delta_max)),
-      .y       = delta_t(CLAMP(delta.y, delta_min, delta_max)),
+      .x       = delta_t(clamp((int)delta.x, delta_min, delta_max)),
+      .y       = delta_t(clamp((int)delta.y, delta_min, delta_max)),
 #if USE_SCROLL_RESOLUTION_MULTIPLIER
       .multiplier = uint8_t(scroll_tick - 1),
-      .wheel   = int8_t(CLAMP(delta.z, SCHAR_MIN, SCHAR_MAX)),
+      .wheel   = int8_t(clamp((int)delta.z, (int)SCHAR_MIN, (int)SCHAR_MAX)),
 #else
-      .wheel   = int8_t(CLAMP(scroll, SCHAR_MIN, SCHAR_MAX)),
+      .wheel   = int8_t(clamp(scroll, (int)SCHAR_MIN, (int)SCHAR_MAX)),
 #endif
       .pan     = 0
     };

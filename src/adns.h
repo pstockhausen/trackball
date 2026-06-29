@@ -96,7 +96,8 @@ public:
     int current_cpi;
     
     // This is the scaling factor used to translate from current_cpi to report_cpi when motion() is called.
-    double cpi_scale_factor;
+    // float is sufficient here and avoids software double emulation on RP2040/SAMD21.
+    float cpi_scale_factor;
 
 private:
     // SPI device abstraction
