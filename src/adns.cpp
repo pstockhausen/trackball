@@ -108,7 +108,7 @@ adns::adns(int8_t ncs, int report_cpi)
     , ncs(ncs)
     , settings(bitrate, MSBFIRST, SPI_MODE3)
 #endif
-{  
+{
 #if defined(ADNS_USE_SPIDEVICE_ABSTRACTION)
   spi_dev = new Adafruit_SPIDevice(ncs, bitrate, SPI_BITORDER_MSBFIRST, SPI_MODE3);
 #else
@@ -202,7 +202,7 @@ bool adns::init ()
 
   debugLogger.printf("Chip initialized\n");
 
-  // By default, run the sensor at its maximum CPI value.  
+  // By default, run the sensor at its maximum CPI value.
   switch(product_id)
   {
     case PID_adns9800:
@@ -220,9 +220,9 @@ bool adns::init ()
 
 
   delay(1);
-  
+
   dispRegisters();
-  
+
   delay(100);
 
   chip_state = chip_state_motion;
@@ -263,7 +263,7 @@ void adns::enable_laser()
     // default value is different from what is said in the datasheet, and if you
     // change the reserved bytes (like by writing 0x00...) it would not work.
     byte laser_ctrl0 = read_reg(REG_LASER_CTRL0);
-    write_reg(REG_LASER_CTRL0, laser_ctrl0 & 0xf0 );  
+    write_reg(REG_LASER_CTRL0, laser_ctrl0 & 0xf0 );
   }
 }
 
@@ -297,13 +297,13 @@ void adns::com_end()
 byte adns::read_reg(byte reg_addr)
 {
   com_begin();
-  
+
   // send adress of the register, with MSBit = 0 to indicate it's a read
   spi_dev->transfer(reg_addr & 0x7f );
   delayMicroseconds(mcs_tSRAD);
   // read data
   byte data = spi_dev->transfer(0);
-  
+
   delayMicroseconds(mcs_tSCLK_NCS_read);
   com_end();
   delayMicroseconds(mcs_tSRW - mcs_tSCLK_NCS_read);
@@ -314,19 +314,19 @@ byte adns::read_reg(byte reg_addr)
 void adns::write_reg(byte reg_addr, byte data)
 {
   com_begin();
-  
+
   //send adress of the register, with MSBit = 1 to indicate it's a write
   spi_dev->transfer(reg_addr | 0x80 );
   //sent data
   spi_dev->transfer(data);
-  
+
   delayMicroseconds(mcs_tSCLK_NCS_write); // tSCLK-NCS for write operation
   com_end();
-  delayMicroseconds(mcs_tSWW - mcs_tSCLK_NCS_write); // Could be shortened, but is looks like a safe lower bound 
+  delayMicroseconds(mcs_tSWW - mcs_tSCLK_NCS_write); // Could be shortened, but is looks like a safe lower bound
 }
 
 bool adns::upload_firmware()
-{  
+{
   // send the firmware to the chip, cf p.18 of the datasheet
 
   unsigned short firmware_length;
@@ -340,7 +340,7 @@ bool adns::upload_firmware()
       firmware_data = firmware_data_adns9800;
 
       // set the configuration_IV register in 3k firmware mode
-      write_reg(REG_Configuration_IV, 0x02); // bit 1 = 1 for 3k mode, other bits are reserved 
+      write_reg(REG_Configuration_IV, 0x02); // bit 1 = 1 for 3k mode, other bits are reserved
     break;
 #endif
 #ifdef ADNS_SUPPORT_PMW3360DM
@@ -369,25 +369,25 @@ bool adns::upload_firmware()
       return false;
     break;
   }
-  
+
   // write 0x1d in SROM_enable reg for initializing
-  write_reg(REG_SROM_Enable, 0x1d); 
-  
+  write_reg(REG_SROM_Enable, 0x1d);
+
   // wait for more than one frame period
   delay(10); // assume that the frame rate is as low as 100fps... even if it should never be that low
-  
+
   // write 0x18 to SROM_enable to start SROM download
-  write_reg(REG_SROM_Enable, 0x18); 
-  
-  // write the SROM file (=firmware data) 
+  write_reg(REG_SROM_Enable, 0x18);
+
+  // write the SROM file (=firmware data)
   com_begin();
   spi_dev->transfer(REG_SROM_Load_Burst | 0x80); // write burst destination adress
   delayMicroseconds(15);
-  
+
   // send all bytes of the firmware
   unsigned char c;
   for(unsigned int i = 0; i < firmware_length; i++)
-  { 
+  {
     c = (unsigned char)pgm_read_byte(firmware_data + i);
     spi_dev->transfer(c);
     delayMicroseconds(15);
@@ -446,13 +446,13 @@ void adns::dispRegisters(void)
       const char *name;
     } regInfo;
     #define REG(x) { REG_##x, #x }
-    regInfo oreg[] = 
+    regInfo oreg[] =
     {
-      REG(Product_ID), 
+      REG(Product_ID),
       REG(Inverse_Product_ID),
       REG(SROM_ID),
-      REG(Motion), 
-      REG(Configuration_I), 
+      REG(Motion),
+      REG(Configuration_I),
       REG(Lift_Detection_Thr)
     };
     #undef REG
@@ -468,11 +468,17 @@ void adns::dispRegisters(void)
         int(regres)
       );
       // printf doesn't have a binary conversion, so just use the builtin.
-      debugLogger.println(regres, BIN);  
+      debugLogger.println(regres, BIN);
       delay(1);
     }
   }
 }
+
+// Minimum SQUAL value to trust motion data. The sensor returns garbage x/y when
+// the ball is lifted or the surface quality is too low (e.g. sensor confused).
+// PMW3360/3389 datasheet recommends ignoring motion when SQUAL < 0x19 (25).
+// ADNS-9800 has a similar recommendation. Tune down if valid motion is being dropped.
+static const byte squal_min = 25;
 
 Vector adns::motion()
 {
@@ -482,13 +488,28 @@ Vector adns::motion()
     return Vector(0, 0);
   }
   read_motion_burst();
+
+  // Bit 7 of the Motion register indicates whether motion data is valid.
+  // If it is not set, the x/y values are stale, discard them.
+  if (!(Motion & 0x80))
+  {
+    return Vector(0, 0);
+  }
+
+  // If surface quality is too low (ball lifted, sensor confused), discard the reading.
+  // This prevents the "stuck in a direction" bug caused by garbage burst data.
+  if (SQUAL < squal_min)
+  {
+    return Vector(0, 0);
+  }
+
   return Vector(x * cpi_scale_factor, y * cpi_scale_factor);
 }
 
 void adns::read_motion_burst()
 {
   byte burst[14];
-  
+
   com_begin();
 
   // Read the burst register to start the transfer
@@ -501,15 +522,15 @@ void adns::read_motion_burst()
 
   com_end();
   delayMicroseconds(mcs_tBEXIT);
-  
+
   // Clear residual motion by writing the Motion register
   write_reg(REG_Motion, 0x00);
-  
+
   // Extract burst values
   Motion = burst[0];
   Observation = burst[1];
-  x = bytes2int(burst[3], burst[2]);  
-  y = bytes2int(burst[5], burst[4]);  
+  x = bytes2int(burst[3], burst[2]);
+  y = bytes2int(burst[5], burst[4]);
   SQUAL = burst[6];
   Pixel_Sum = burst[7];
   Maximum_Pixel = burst[8];
@@ -532,7 +553,7 @@ void adns::read_motion_burst()
     debugLogger.println(y);
 #endif
   }
-  
+
 }
 
 void adns::set_cpi(int cpi)
@@ -608,7 +629,7 @@ int adns::image_width()
     default:
     break;
   }
-  return result;  
+  return result;
 }
 int adns::image_height()
 {
@@ -660,7 +681,7 @@ void adns::read_image(uint8_t *pixels)
   write_reg(REG_Frame_Capture, 0xc5 );
 
   // I'm not sure how long "two frames" is. Trying this.
-  delayMicroseconds(1000); 
+  delayMicroseconds(1000);
 
   // The bit in the adns9800 datasheet about reading the Motion register doesn't seem to do anything useful.
   // I suspect it may be a mis-print. This code works on the hardware I have (both adns9800 and pmw3360)
